@@ -1,6 +1,7 @@
 /*
 !/.gitignore
 !/LICENSE
+!/README.md
 !/engine/
 /engine/data/block_textures/
 !/web/
