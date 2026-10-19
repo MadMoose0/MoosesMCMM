@@ -2013,6 +2013,14 @@ hr {
         opacity: .7;
     }
 
+    .panel-foot .gh-ic {
+        width: 12px;
+        height: 12px;
+        margin-right: 4px;
+        vertical-align: -1px;
+        fill: currentColor;
+    }
+
 /******** phones */
 @media (max-width: 620px) {
     .panel-foot {
