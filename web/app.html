@@ -1,0 +1,479 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+
+    <title>Moose's Minecraft Mural Maker — Pixel Art Generator</title>
+    <meta name="description" content="The converter itself. Load an image, pick your palette, tune the processing algorithm, then export a datapack or .litematic schematic. Runs entirely in your browser.">
+    <link rel="canonical" href="https://mcmural.madmoose.im/app">
+
+    <script>(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':
+    new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],
+    j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
+    'https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);
+    })(window,document,'script','dataLayer','GTM-52RN8Q2B');</script>
+
+    <meta name="theme-color" content="#1c1c1c">
+    <meta name="color-scheme" content="dark light">
+    <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1">
+
+    <meta property="og:type" content="website">
+    <meta property="og:site_name" content="Moose's Minecraft Mural Maker">
+    <meta property="og:url" content="https://mcmural.madmoose.im/app">
+    <meta property="og:title" content="Moose's Minecraft Mural Maker — Pixel Art Generator">
+    <meta property="og:description" content="Turn any image into Minecraft blocks. Choose your palette, tune the processing algorithm, then export a datapack or .litematic schematic.">
+    <meta property="og:image" content="https://mcmural.madmoose.im/resources/images/og-image.png">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:image:alt" content="Moose's Minecraft Mural Maker — a Minecraft pixel art and mural generator">
+
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="Moose's Minecraft Mural Maker — Pixel Art Generator">
+    <meta name="twitter:description" content="Turn any image into Minecraft blocks, then export a datapack or .litematic schematic.">
+    <meta name="twitter:image" content="https://mcmural.madmoose.im/resources/images/og-image.png">
+
+    <link rel="icon" href="favicon.ico" sizes="any">
+    <link rel="icon" href="favicon.svg" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="favicon.png">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous">
+    <link rel="stylesheet" crossorigin="anonymous" href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500&display=swap">
+    <link rel="stylesheet" href="style.css">
+
+    <script type="application/ld+json">
+        {
+          "@context": "https://schema.org",
+          "@type": "WebApplication",
+          "name": "Moose's Minecraft Mural Maker",
+          "alternateName": "Minecraft Pixel Art & Mural Generator",
+          "url": "https://mcmural.madmoose.im/app",
+          "applicationCategory": "MultimediaApplication",
+          "applicationSubCategory": "Image converter",
+          "operatingSystem": "Any modern web browser",
+          "author": {
+            "@type": "Person",
+            "name": "MadMoose",
+            "url": "https://madmoose.im/"
+          },
+          "browserRequirements": "Requires JavaScript, WebAssembly and SharedArrayBuffer",
+          "description": "Converts any image into a buildable Minecraft mural. Matches every pixel to a Minecraft block using perceptual colour and texture comparison, then exports the result as a datapack or a .litematic schematic.",
+          "offers": {
+            "@type": "Offer",
+            "price": "0",
+            "priceCurrency": "USD"
+          },
+          "featureList": [
+            "Convert any image to Minecraft blocks",
+            "Murals up to 1000 by 1000 blocks",
+            "Block palettes for Minecraft 1.13 to 26.3",
+            "Choose which blocks the palette may use, one by one or by group: wool, concrete, terracotta, glass, wood, greyscale",
+            "Floyd-Steinberg, Atkinson, Bayer and noise dithering",
+            "Multi-pass refinement and gradient feathering",
+            "Biome tinting for grass, leaves and vines",
+            "Snapshots to compare attempts, presets to save and share settings",
+            "Export as a Minecraft datapack",
+            "Export as a Litematica .litematic schematic"
+          ],
+          "screenshot": "https://mcmural.madmoose.im/resources/images/og-image.png"
+        }
+    </script>
+</head>
+<body>
+    <noscript><iframe src="https://www.googletagmanager.com/ns.html?id=GTM-52RN8Q2B"
+    height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
+
+    <noscript>
+        <div class="noscript-note">
+            <h2>Moose's Minecraft Mural Maker</h2>
+            <p>
+                This is a Minecraft pixel art and mural generator. Upload any image
+                and it matches every chunk of it to a real Minecraft block, comparing
+                both average colour and the texture inside each block face, then hands
+                back a datapack or a Litematica <code>.litematic</code> schematic you
+                can build with.
+            </p>
+            <p>
+                The converter runs entirely in your browser. Nothing is uploaded to a server.
+            </p>
+            <p><a href="/">Read the guide to how it works</a></p>
+        </div>
+    </noscript>
+
+    <div id="boot">
+        <div class="boot-inner">
+            <p class="boot-title">Moose's Minecraft Mural Maker</p>
+            <div class="boot-bar"><span></span></div>
+            <p id="boot-msg">Loading engine…</p>
+
+            <!-- shown until the app starts, also what crawlers read -->
+            <p class="boot-blurb">Turn any image into a Minecraft mural or pixel art. Pick your block palette, tune the matching algorithm, and export a datapack or Litematica schematic — all in your browser.</p>
+            <p class="boot-link"><a href="/">How it works &amp; full guide</a></p>
+        </div>
+    </div>
+
+    <button id="btn-scroll-top" class="fab" title="Scroll to top" aria-label="Scroll to top">
+        <svg class="ic"><use href="resources/sprite.svg#icon-arrow_left"></use></svg>
+    </button>
+
+    <main id="app" hidden>
+
+        <h1 class="sr-only">Moose's Minecraft Mural Maker — Minecraft pixel art and mural generator</h1>
+
+        <section id="left">
+            <div class="tabbar" role="tablist">
+                <button class="tab is-active" role="tab" data-tab="config">Configuration</button>
+                <button class="tab" role="tab" data-tab="palette">Block Palette</button>
+
+                <div class="tab-tools">
+                    <select class="tabtool-select" id="in-version" title="Minecraft version the palette is built for" aria-label="Minecraft version"></select>
+                    <span class="tab-tools-sep"></span>
+                    <button class="tabtool" id="btn-cfg-save" title="Save current settings to this browser" aria-label="Save current settings to this browser"><svg class="ic" aria-hidden="true"><use href="#icon-cfg_save"></use></svg></button>
+                    <button class="tabtool" id="btn-cfg-load" title="Load settings saved in this browser" aria-label="Load settings saved in this browser"><svg class="ic" aria-hidden="true"><use href="#icon-cfg_load"></use></svg></button>
+                    <span class="tab-tools-sep"></span>
+                    <button class="tabtool" id="btn-cfg-export" title="Export settings as a .json file" aria-label="Export settings as a .json file"><svg class="ic" aria-hidden="true"><use href="#icon-cfg_export"></use></svg></button>
+                    <button class="tabtool" id="btn-cfg-import" title="Import settings from a .json file" aria-label="Import settings from a .json file"><svg class="ic" aria-hidden="true"><use href="#icon-cfg_import"></use></svg></button>
+                    <span class="tab-tools-sep"></span>
+                    <button class="tabtool" id="btn-cfg-reset" title="Reset all settings to defaults" aria-label="Reset all settings to defaults"><svg class="ic" aria-hidden="true"><use href="#icon-reset_global"></use></svg></button>
+                </div>
+            </div>
+
+            <div id="menu-save" class="cfg-menu" hidden>
+                <div class="cfg-menu-title"><svg class="ic" aria-hidden="true"><use href="#icon-cfg_save"></use></svg>Save to browser</div>
+                <input type="text" id="save-name" placeholder="Preset name" maxlength="40">
+                <div id="save-existing" hidden>
+                    <div class="cfg-hint">Or replace an existing one</div>
+                    <div class="cfg-list" id="save-slots"></div>
+                </div>
+                <button class="cfg-primary" id="btn-save-preset">Save preset</button>
+                <div class="cfg-hint">Preset will be saved to the browser's local cache and could be deleted with cache wipe.</div>
+            </div>
+
+            <div id="menu-load" class="cfg-menu" hidden>
+                <div class="cfg-menu-title"><svg class="ic" aria-hidden="true"><use href="#icon-cfg_load"></use></svg>Load from browser</div>
+                <div class="cfg-list" id="load-list"></div>
+                <div class="cfg-empty" id="load-empty" hidden>No presets yet. Save one to see it here.</div>
+                <div class="cfg-hint">Loading a preset will not change the image.</div>
+            </div>
+
+            <div id="menu-export" class="cfg-menu" hidden>
+                <div class="cfg-menu-title"><svg class="ic" aria-hidden="true"><use href="#icon-cfg_export"></use></svg>Export JSON</div>
+                <input type="text" id="export-name" value="my_mural.mmmm.json">
+                <button class="cfg-primary" id="btn-export-go">Download</button>
+            </div>
+
+            <div id="menu-import" class="cfg-menu" hidden>
+                <div class="cfg-menu-title"><svg class="ic" aria-hidden="true"><use href="#icon-cfg_import"></use></svg>Import JSON</div>
+                <div class="cfg-drop" id="import-drop">Drop a .json here</div>
+                <input type="file" id="import-file" accept="application/json,.json" hidden>
+                <button class="cfg-primary" id="btn-import-pick">Choose file</button>
+                <div class="cfg-hint">Importing a preset will not change the image.</div>
+            </div>
+
+            <div class="tabbody">
+
+                <div class="tabpane is-active" id="pane-config" role="tabpanel">
+
+                    <div class="group">
+                        <div class="group-head"><h3>1. Choose or Drop an Image</h3></div>
+                        <div class="group-box">
+                            <div class="row">
+                                <input type="text" id="image-path" class="grow" placeholder="No image loaded" readonly>
+                                <button id="btn-browse" class="btn">Browse…</button>
+                                <input type="file" id="file-input" accept="image/png,image/jpeg,image/bmp,image/webp" hidden>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="group">
+                        <div class="group-head"><h3>2. Basic Settings</h3></div>
+                        <div class="group-box">
+                            <div class="row">
+                                <label for="in-width">Width:</label>
+                                <input type="number" id="in-width" class="num" min="1" max="1000" value="50">
+                                <label for="in-height">Height:</label>
+                                <input type="number" id="in-height" class="num" min="1" max="1000" value="70">
+                                <span class="gap"></span>
+                                <label class="check"><input type="checkbox" id="in-lock" checked><i></i>Keep Aspect Ratio</label>
+                            </div>
+                            <div class="row">
+                                <label for="in-name">Mural Name:</label>
+                                <input type="text" id="in-name" class="grow" value="my_mural" maxlength="120">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="group">
+                        <div class="group-head">
+                            <h3>2.5. Image Pre-Processing</h3><button class="help" type="button" data-help="tweaks" aria-label="What does this do?"><svg class="ic" aria-hidden="true"><use href="#icon-help"></use></svg></button>
+                            <button class="reset" data-reset="tweaks" title="Reset to defaults"><svg class="ic--reset"><use href="#icon-reset"></use></svg></button>
+                        </div>
+                        <div class="group-box">
+                            <div class="slider-grid">
+                                <div class="slider" data-slider="denoise" data-min="0" data-max="10" data-step="0.1" data-dp="1" data-label="Noise Redux"></div>
+                                <div class="slider" data-slider="sharpen" data-min="0" data-max="5" data-step="0.1" data-dp="1" data-label="Sharpness"></div>
+                                <div class="slider" data-slider="contrast" data-min="0.5" data-max="2" data-step="0.01" data-dp="2" data-label="Contrast"></div>
+                                <div class="slider" data-slider="bright" data-min="-0.5" data-max="0.5" data-step="0.01" data-dp="2" data-label="Brightness"></div>
+                                <div class="slider" data-slider="sat" data-min="0" data-max="3" data-step="0.01" data-dp="2" data-label="Saturation"></div>
+                                <div class="slider" data-slider="hue" data-min="-180" data-max="180" data-step="1" data-dp="0" data-label="Hue Shift" data-suffix="°"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="group">
+                        <div class="group-head">
+                            <h3>3. Placement in World</h3><button class="help" type="button" data-help="placement" aria-label="What does this do?"><svg class="ic" aria-hidden="true"><use href="#icon-help"></use></svg></button>
+                            <button class="reset" data-reset="placement" title="Reset to defaults"><svg class="ic--reset"><use href="#icon-reset"></use></svg></button>
+                        </div>
+                        <div class="group-box">
+                            <div class="row">
+                                <label for="in-orientation">Orientation:</label>
+                                <select id="in-orientation" class="w140">
+                                    <option value="0">Vertical</option>
+                                    <option value="1">Horizontal</option>
+                                </select>
+                                <div class="row">
+                                    <label for="in-facing">Facing:</label>
+                                    <select id="in-facing" class="w140"></select>
+                                </div>
+                            </div>
+                            <div class="row">
+                                <label for="in-biome">Biome Tint:</label>
+                                <select id="in-biome" class="w140"></select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="group">
+                        <div class="group-head">
+                            <h3>4. Algorithm Tuning</h3><button class="help" type="button" data-help="weights" aria-label="What does this do?"><svg class="ic" aria-hidden="true"><use href="#icon-help"></use></svg></button>
+                            <button class="reset" data-reset="weights" title="Reset to defaults"><svg class="ic--reset"><use href="#icon-reset"></use></svg></button>
+                        </div>
+                        <div class="group-box">
+                            <div class="slider-row">
+                                <label>Macro Colour (Overall block match):</label>
+                                <div class="slider" data-slider="wColor" data-min="0" data-max="10" data-step="0.1" data-dp="2" data-display-scale="0.1"></div>
+                            </div>
+                            <div class="slider-row">
+                                <label>Micro Spatial (Match edges &amp; shapes):</label>
+                                <div class="slider" data-slider="wSpatial" data-min="0" data-max="10" data-step="0.1" data-dp="2" data-display-scale="0.1"></div>
+                            </div>
+                            <div class="slider-row">
+                                <label>Micro Texture (Match noise &amp; contrast):</label>
+                                <div class="slider" data-slider="wTexture" data-min="0" data-max="10" data-step="0.1" data-dp="2" data-display-scale="0.1"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="group">
+                        <div class="group-head">
+                            <h3>5. Dithering Options</h3><button class="help" type="button" data-help="dither" aria-label="What does this do?"><svg class="ic" aria-hidden="true"><use href="#icon-help"></use></svg></button>
+                            <button class="reset" data-reset="dither" title="Reset to defaults"><svg class="ic--reset"><use href="#icon-reset"></use></svg></button>
+                        </div>
+                        <div class="group-box">
+                            <div class="slider-row">
+                                <label for="in-dither">Method:</label>
+                                <select id="in-dither" class="w170"></select>
+                            </div>
+                            <div class="slider-row">
+                                <label>Intensity:</label>
+                                <div class="slider" data-slider="ditherIntensity" data-min="0" data-max="1" data-step="0.01" data-dp="2"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="group">
+                        <div class="group-head">
+                            <h3>6. Multi-Pass Iterative Refinement</h3><button class="help" type="button" data-help="pass2" aria-label="What does this do?"><svg class="ic" aria-hidden="true"><use href="#icon-help"></use></svg></button>
+                            <button class="reset" data-reset="pass2" title="Reset to defaults"><svg class="ic--reset"><use href="#icon-reset"></use></svg></button>
+                        </div>
+                        <div class="group-box">
+                            <label class="check"><input type="checkbox" id="in-pass2" checked><i></i>Enable</label>
+                            <fieldset id="pass2-fields">
+                                <div class="slider-row">
+                                    <label for="in-chunk">Error Matrix Size:</label>
+                                    <select id="in-chunk" class="w170"></select>
+                                </div>
+                                <div class="slider-row" id="row-threshold">
+                                    <label>Error-Seeking Threshold:</label>
+                                    <div class="slider" data-slider="pass2Threshold" data-min="0.05" data-max="1" data-step="0.01" data-dp="2"></div>
+                                </div>
+                                <div class="slider-row">
+                                    <label>Passes:</label>
+                                    <div class="slider" data-slider="pass2Passes" data-min="1" data-max="3" data-step="1" data-dp="0"></div>
+                                </div>
+                                <div class="slider-row">
+                                    <label>Candidates per Block:</label>
+                                    <div class="slider" data-slider="pass2Candidates" data-min="3" data-max="16" data-step="1" data-dp="0"></div>
+                                </div>
+                                <span class="group-gap"></span>
+                                <div class="slider-row">
+                                    <label>Recursive Denoising (MSE):</label>
+                                    <div class="slider" data-slider="wMSE" data-min="0" data-max="10" data-step="0.1" data-dp="2" data-display-scale="0.1"></div>
+                                </div>
+                                <div class="slider-row">
+                                    <label>Edge Preservation (SSIM):</label>
+                                    <div class="slider" data-slider="wSSIM" data-min="0" data-max="10" data-step="0.1" data-dp="2" data-display-scale="0.1"></div>
+                                </div>
+                            </fieldset>
+                        </div>
+                    </div>
+
+                    <div class="group">
+                        <div class="group-head">
+                            <h3>7. Experimental</h3><button class="help" type="button" data-help="enhance" aria-label="What does this do?"><svg class="ic" aria-hidden="true"><use href="#icon-help"></use></svg></button>
+                            <button class="reset" data-reset="enhance" title="Reset to defaults"><svg class="ic--reset"><use href="#icon-reset"></use></svg></button>
+                        </div>
+                        <div class="group-box">
+                            <div class="slider-row feature-row" id="row-exp-grain">
+                                <label class="check"><input type="checkbox" id="in-exp-grain"><i></i>Grain in flat areas:</label>
+                                <div class="slider" data-slider="enhGrain" data-min="0" data-max="1" data-step="0.01" data-dp="2"></div>
+                            </div>
+                            <div class="slider-row feature-row" id="row-exp-flat">
+                                <label class="check"><input type="checkbox" id="in-exp-flat"><i></i>Flat areas: colour over texture:</label>
+                                <div class="slider" data-slider="enhFlat" data-min="0" data-max="1" data-step="0.01" data-dp="2"></div>
+                            </div>
+                            <div class="slider-row feature-row" id="row-exp-protect">
+                                <label class="check"><input type="checkbox" id="in-exp-protect"><i></i>Protect fine texture:</label>
+                                <div class="slider" data-slider="enhProtect" data-min="0" data-max="1" data-step="0.01" data-dp="2"></div>
+                            </div>
+                            <label class="check"><input type="checkbox" id="in-enh-feather"><i></i>Feathering</label>
+                        </div>
+                    </div>
+
+                </div>
+
+                <div class="tabpane" id="pane-palette" role="tabpanel">
+
+                    <div class="row search-row">
+                        <label for="in-search">Search:</label>
+                        <div class="searchbox grow" id="searchbox">
+                            <input type="text" id="in-search" placeholder="Filter blocks…" autocomplete="off" spellcheck="false">
+                            <button type="button" id="btn-search-clear" class="searchbox-clear" title="Clear search" hidden><svg class="ic" aria-hidden="true"><use href="#icon-clear"></use></svg></button>
+                        </div>
+                        <button type="button" id="btn-filters" class="btn sq" title="Add a block group to the search" aria-haspopup="listbox" aria-expanded="false"><svg class="ic" aria-hidden="true"><use href="#icon-filters"></use></svg></button>
+                    </div>
+                    <hr>
+
+                    <div class="picker">
+                        <div class="picker-col">
+                            <h4>Allowed Blocks</h4>
+                            <div class="blocklist" id="list-allowed" tabindex="0"></div>
+                        </div>
+
+                        <div class="picker-tools">
+                            <button class="icobtn" id="btn-move" title="Move to Disallowed"><svg class="ic" aria-hidden="true"><use href="#icon-arrow_right"></use></svg></button>
+                            <span class="tool-gap"></span>
+                            <button class="icobtn" id="btn-all-allow" title="Allow all blocks"><svg class="ic" aria-hidden="true"><use href="#icon-move_all_left"></use></svg></button>
+                            <button class="icobtn" id="btn-all-disallow" title="Disallow all blocks"><svg class="ic" aria-hidden="true"><use href="#icon-move_all_right"></use></svg></button>
+                            <span class="tool-gap"></span>
+                            <button class="icobtn" id="btn-deselect" title="Clear current selections"><svg class="ic" aria-hidden="true"><use href="#icon-deselect"></use></svg></button>
+                            <span class="tool-gap"></span>
+                            <button class="icobtn" id="btn-moose" title="Moose's Choice (recommended palette)"><svg class="ic" aria-hidden="true"><use href="#icon-moose"></use></svg></button>
+                        </div>
+
+                        <div class="picker-col">
+                            <h4>Disallowed Blocks</h4>
+                            <div class="blocklist" id="list-disallowed" tabindex="0"></div>
+                        </div>
+                    </div>
+
+                    <div id="filter-menu" class="popup filter-menu" role="listbox" aria-label="Block groups" hidden></div>
+
+                    <hr>
+                    <span class="row">
+                        <label class="check"><input type="checkbox" id="in-overlays"><i></i>Use overlays (experimental)</label>
+                        <button class="help" type="button" data-help="overlays" aria-label="What does this do?"><svg class="ic" aria-hidden="true"><use href="#icon-help"></use></svg></button>
+                    </span>
+
+                    <fieldset id="overlay-fields">
+                        <div class="picker picker--overlay">
+                            <div class="picker-col">
+                                <h4>Allowed Overlays</h4>
+                                <div class="blocklist blocklist--short" id="list-ov-allowed" tabindex="0"></div>
+                            </div>
+                            <div class="picker-tools">
+                                <button class="icobtn" id="btn-ov-move" title="Move to Disallowed"><svg class="ic" aria-hidden="true"><use href="#icon-arrow_right"></use></svg></button>
+                                <button class="icobtn" id="btn-ov-all-allow" title="Allow all overlays"><svg class="ic" aria-hidden="true"><use href="#icon-move_all_left"></use></svg></button>
+                                <button class="icobtn" id="btn-ov-all-disallow" title="Disallow all overlays"><svg class="ic" aria-hidden="true"><use href="#icon-move_all_right"></use></svg></button>
+                            </div>
+                            <div class="picker-col">
+                                <h4>Disallowed Overlays</h4>
+                                <div class="blocklist blocklist--short" id="list-ov-disallowed" tabindex="0"></div>
+                            </div>
+                        </div>
+                    </fieldset>
+
+                </div>
+            </div>
+
+            <p id="warning" class="warning" hidden></p>
+
+            <div class="actions">
+                <button id="btn-datapack" class="btn primary">GENERATE DATAPACK</button>
+                <button id="btn-litematic" class="btn primary">EXPORT .LITEMATIC</button>
+            </div>
+
+            <p class="panel-foot">
+                <a href="/">How it works &amp; full guide</a>
+                <span class="panel-note">| Not affiliated with Mojang or Microsoft.</span>
+            </p>
+        </section>
+
+        <div id="splitter" role="separator" aria-orientation="vertical" tabindex="0" title="Drag to resize"></div>
+
+        <section id="right">
+            <header class="preview-head">
+                <h2>Interactive Preview</h2>
+                <div class="head-tools">
+                    <button class="btn" id="btn-snapshot" title="Take a snapshot of the current preview and settings"><svg class="ic" aria-hidden="true"><use href="#icon-snapshot"></use></svg>Snapshot</button>
+                    <span class="tab-tools-sep"></span>
+                    <span class="bg-label">BG Colour:</span>
+                    <div class="bg-picker" id="bg-picker">
+                        <button class="swatch is-active" data-bg="0" title="Dark"></button>
+                        <button class="swatch" data-bg="1" title="Light"></button>
+                        <button class="swatch" data-bg="2" title="Biome grass"></button>
+                        <button class="swatch swatch--transp" data-bg="3" title="Transparent"><svg class="swatch--transp--img" aria-hidden="true"><use href="#icon-transp_bg"></use></svg></button>
+                        <button class="help" type="button" data-help="bg" aria-label="What does this do?"><svg class="ic" aria-hidden="true"><use href="#icon-help"></use></svg></button>
+                    </div>
+                    <span class="tab-tools-sep"></span>
+                    <button class="btn" id="btn-reset-view" title="Reset View">Reset View</button>
+                </div>
+            </header>
+
+            <div id="canvas-wrap">
+                <canvas id="canvas"></canvas>
+                <div id="canvas-empty" class="canvas-msg">
+                    <strong>No preview yet</strong>
+                    <span>Drop an image anywhere, or use Browse.</span>
+                </div>
+                <div id="canvas-busy" class="canvas-badge" hidden>Processing image… please wait</div>
+                <div id="canvas-hint" class="canvas-hint">Scroll to zoom · Drag to pan · Ctrl+click a block to disallow it</div>
+
+                <aside id="filmstrip" aria-label="Preview snapshots" hidden>
+                    <div class="strip-head">Shots</div>
+                    <div id="strip-items"></div>
+                </aside>
+                <div id="snap-ring" hidden></div>
+                <div id="snap-badge" hidden></div>
+            </div>
+
+            <div id="console">
+                <button type="button" id="console-toggle" aria-expanded="true" aria-controls="log" aria-label="Console" title="Minimise the console">
+                    <span class="chev" aria-hidden="true"></span>
+                    <span id="console-last"></span>
+                </button>
+                <div id="log" tabindex="0"></div>
+                <div id="status" hidden></div>
+            </div>
+        </section>
+
+    </main>
+
+    <div id="toast" hidden></div>
+    <div id="help-pop" class="cfg-menu" hidden></div>
+
+    <script src="mural.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,12 @@
+/*
+!/.gitignore
+!/engine/
+/engine/data/block_textures/
+!/web/
+/web/*
+!/web/app.*
+!/web/style.css
+!/web/mural.*
+!/web/resources/
+/web/resources/images/
+/engine/BUILD.md
