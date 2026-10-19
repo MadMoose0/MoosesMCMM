@@ -1,5 +1,6 @@
 /*
 !/.gitignore
+!/LICENSE
 !/engine/
 /engine/data/block_textures/
 !/web/
