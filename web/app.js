@@ -2048,7 +2048,7 @@ function logAction(msg) {
 //////////////// CRASH RECOVERY
 
 // no progress for this long = out-of-memory hang (ms)
-const STALL_MS = 30000;
+const STALL_MS = 15000;
 
 // longer side of a picture as the engine gets it: 1000 blocks x 16 px
 const MAX_SOURCE_SIDE = 16000;
