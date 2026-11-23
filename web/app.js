@@ -73,6 +73,8 @@ const api = {
   previewAtlas:   () => M._mural_preview_atlas() >>> 0,
   previewCols:    () => M._mural_preview_atlas_cols(),
   previewCount:   () => M._mural_preview_atlas_count(),
+  previewIdsJson: () => M.ccall('mural_preview_ids_json', 'string', [], []),
+  previewOverlaysJson: () => M.ccall('mural_preview_overlays_json', 'string', [], []),
   pickAndDisallow:(c, r) => M.ccall('mural_pick_and_disallow', 'string', ['number','number'], [c, r]),
   bgColor:        m => M.ccall('mural_bg_color', 'string', ['number'], [m]),
 
@@ -161,7 +163,7 @@ const el = {
   moveBtn: $('#btn-move'), ovMoveBtn: $('#btn-ov-move'),
   warning: $('#warning'),
   canvas: $('#canvas'), wrap: $('#canvas-wrap'),
-  empty: $('#canvas-empty'), busy: $('#canvas-busy'),
+  empty: $('#canvas-empty'), busy: $('#canvas-busy'), readout: $('#block-readout'),
   emptyTitle: $('#canvas-empty strong'), emptyHint: $('#canvas-empty span'),
   log: $('#log'), status: $('#status'),
   right: $('#right'), consoleToggle: $('#console-toggle'), consoleLast: $('#console-last'),
@@ -1424,6 +1426,8 @@ const preview = {
   grid: null,    // atlas slot per block
   mean: null,    // canvas, 1 px per block, used when zoomed far out
   atlas: null,    // canvas, 16x16 tile per palette entry in use
+  ids: null,      // base block id per atlas slot (mural_preview_ids_json)
+  overlays: null, // overlay string per atlas slot (mural_preview_overlays_json)
   cols: 32
 };
 
@@ -1476,8 +1480,10 @@ function onPreviewReady() {
     const count = api.previewCount();
     const rows = Math.max(1, Math.ceil(count / preview.cols));
     preview.atlas = rgbaToCanvas(api.previewAtlas(), preview.cols * 16, rows * 16);
+    preview.ids = JSON.parse(api.previewIdsJson());
+    preview.overlays = JSON.parse(api.previewOverlaysJson());
   } else {
-    preview.grid = preview.mean = preview.atlas = null;
+    preview.grid = preview.mean = preview.atlas = preview.ids = preview.overlays = null;
   }
 
   // with aspect lock the engine picks the other side, so read the size back
@@ -1669,6 +1675,29 @@ function wireCanvas() {
     requestDraw();
   };
 
+  // ctrl-held block naming: name of the block under the cursor, top-right corner of the canvas
+  let hoverPos = null;    // css px relative to the canvas, last mouse position
+
+  const cellSlotAt = (x, y) => {
+    if (!preview.w || !preview.grid) return -1;
+    const col = Math.floor((x * rendered.dpr - rendered.ox) / rendered.scale);
+    const row = Math.floor((y * rendered.dpr - rendered.oy) / rendered.scale);
+    if (col < 0 || row < 0 || col >= preview.w || row >= preview.h) return -1;
+    return preview.grid[row * preview.w + col];
+  };
+
+  const showBlockReadout = () => {
+    if (!hoverPos || hoverSnap) return hideBlockReadout();
+    const slot = cellSlotAt(hoverPos.x, hoverPos.y);
+    if (slot < 0 || !preview.ids || !preview.ids[slot]) return hideBlockReadout();
+    const base = preview.ids[slot];
+    const ov = (preview.overlays && preview.overlays[slot]) || '';
+    el.readout.textContent = ov ? `${base} + ${ov.replace(/\[.*$/, '')}` : base;
+    el.readout.hidden = false;
+  };
+
+  const hideBlockReadout = () => { el.readout.hidden = true; };
+
   c.addEventListener('wheel', e => {
     e.preventDefault();
     const r = c.getBoundingClientRect();
@@ -1701,7 +1730,11 @@ function wireCanvas() {
 
   c.addEventListener('pointermove', e => {
     if (!pointers.size && e.pointerType === 'mouse') {
-      c.classList.toggle('is-picking', e.ctrlKey || e.metaKey);
+      const picking = e.ctrlKey || e.metaKey;
+      c.classList.toggle('is-picking', picking);
+      const r = c.getBoundingClientRect();
+      hoverPos = { x: e.clientX - r.left, y: e.clientY - r.top };
+      if (picking) showBlockReadout(); else hideBlockReadout();
     }
 
     const prev = pointers.get(e.pointerId);
@@ -1752,12 +1785,13 @@ function wireCanvas() {
   };
   c.addEventListener('pointerup', release);
   c.addEventListener('pointercancel', release);
+  c.addEventListener('pointerleave', () => { hoverPos = null; hideBlockReadout(); });
 
   window.addEventListener('keydown', e => {
-    if (e.key === 'Control' || e.key === 'Meta') c.classList.add('is-picking');
+    if (e.key === 'Control' || e.key === 'Meta') { c.classList.add('is-picking'); showBlockReadout(); }
   });
   window.addEventListener('keyup', e => {
-    if (e.key === 'Control' || e.key === 'Meta') c.classList.remove('is-picking');
+    if (e.key === 'Control' || e.key === 'Meta') { c.classList.remove('is-picking'); hideBlockReadout(); }
   });
 
   // no image yet: a click anywhere on the preview opens the file picker

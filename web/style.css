@@ -1089,6 +1089,23 @@ hr {
     pointer-events: none;
 }
 
+.block-readout {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    max-width: 60%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    padding: 5px 12px;
+    background: rgba(40,40,40,.92);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: #e8e5e0;
+    font-size: 13px;
+    pointer-events: none;
+}
+
 
 /**************** CONSOLE */
 #console {
