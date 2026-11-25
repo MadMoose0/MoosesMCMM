@@ -35,6 +35,7 @@ std::vector<float> getBiomeTintVals(const std::string& baseName, const std::stri
 }
 
 std::vector<int> getPreviewBgColor(int mode, const std::string& biomeName) {
+    std::lock_guard<std::recursive_mutex> texLock(textureMutex);
     if (mode == 1) return { 220, 220, 220 };    // light
     if (mode == 3) return { 128, 128, 128 };    // checkerboard, grey underneath
 
@@ -215,6 +216,145 @@ void setDroppedImage(const char* path) {
 
 
 //////////////// BLOCK DATABASE
+
+// re-cuts shulker box faces and refreshes the 16x16 UI icons after resource packs change allFiles
+void rebuildBlockUiAndShulkers() {
+    std::lock_guard<std::recursive_mutex> texLock(textureMutex);
+    static const std::vector<std::string> modifiers = { "front", "side", "top" };
+    static const char* const places[] = { "floor", "wall north", "wall south", "wall east", "wall west", "ceiling" };
+
+    for (const auto& bd : masterDatabase) {
+        ExtendedBlockInfo& extInfo = extBlockInfo[bd.id];
+
+        if (bd.id.find("shulker_box") != std::string::npos) {
+            std::string shulkerColor = "shulker";
+            if (bd.id != "shulker_box") shulkerColor = "shulker_" + bd.id.substr(0, bd.id.find("_shulker_box"));
+
+            std::string shulkerFile = shulkerColor + ".png";
+            if (allFiles.find(shulkerFile) == allFiles.end()) shulkerFile = "shulker.png";
+            if (allFiles.find(shulkerFile) == allFiles.end()) shulkerFile = bd.id + ".png";
+
+            auto it = allFiles.find(shulkerFile);
+            if (it != allFiles.end() && it->second.w >= 64 && it->second.h >= 64) {
+                const TextureRaw& tr = it->second;
+                extInfo.uiRgbaArray.resize(16 * 16 * 4, 0);
+                std::vector<float> tint = getBiomeTintVals(bd.id, "Plains");
+
+                TextureRaw tTr, bTr, sTr;
+                tTr.w = 16; tTr.h = 16; tTr.data.resize(16 * 16 * 4, 0);
+                bTr.w = 16; bTr.h = 16; bTr.data.resize(16 * 16 * 4, 0);
+                sTr.w = 16; sTr.h = 16; sTr.data.resize(16 * 16 * 4, 0);
+
+                for (int y = 0; y < 16; ++y) {
+                    for (int x = 0; x < 16; ++x) {
+                        int dstIdx = (y * 16 + x) * 4;
+
+                        int srcT = ((y + 0) * tr.w + (x + 16)) * 4;
+                        tTr.data[dstIdx] = tr.data[srcT]; tTr.data[dstIdx + 1] = tr.data[srcT + 1];
+                        tTr.data[dstIdx + 2] = tr.data[srcT + 2]; tTr.data[dstIdx + 3] = tr.data[srcT + 3];
+
+                        float alphaUI = tr.data[srcT + 3] / 255.0f;
+                        extInfo.uiRgbaArray[dstIdx] = (unsigned char)(std::min(255.0f, tr.data[srcT] * tint[0] * alphaUI));
+                        extInfo.uiRgbaArray[dstIdx + 1] = (unsigned char)(std::min(255.0f, tr.data[srcT + 1] * tint[1] * alphaUI));
+                        extInfo.uiRgbaArray[dstIdx + 2] = (unsigned char)(std::min(255.0f, tr.data[srcT + 2] * tint[2] * alphaUI));
+                        extInfo.uiRgbaArray[dstIdx + 3] = tr.data[srcT + 3];
+
+                        int srcB = ((y + 28) * tr.w + (x + 32)) * 4;
+                        bTr.data[dstIdx] = tr.data[srcB]; bTr.data[dstIdx + 1] = tr.data[srcB + 1];
+                        bTr.data[dstIdx + 2] = tr.data[srcB + 2]; bTr.data[dstIdx + 3] = tr.data[srcB + 3];
+
+                        int srcBg = ((y + 36) * tr.w + (x + 0)) * 4;
+                        int srcFg = ((y + 16) * tr.w + (x + 0)) * 4;
+                        float alphaFg = tr.data[srcFg + 3] / 255.0f;
+                        sTr.data[dstIdx] = (unsigned char)((tr.data[srcFg] * alphaFg) + (tr.data[srcBg] * (1.0f - alphaFg)));
+                        sTr.data[dstIdx + 1] = (unsigned char)((tr.data[srcFg + 1] * alphaFg) + (tr.data[srcBg + 1] * (1.0f - alphaFg)));
+                        sTr.data[dstIdx + 2] = (unsigned char)((tr.data[srcFg + 2] * alphaFg) + (tr.data[srcBg + 2] * (1.0f - alphaFg)));
+                        sTr.data[dstIdx + 3] = 255;
+                    }
+                }
+
+                // HD shulker sheet: cut out the full-resolution faces for the mural preview
+                if (tr.fullW > 64 && tr.fullH >= tr.fullW && tr.fullData.size() >= (size_t)tr.fullW * tr.fullW * 4) {
+                    const int fw = tr.fullW / 4;
+                    if (fw > 16) {
+                        tTr.fullW = tTr.fullH = fw; tTr.fullData.resize((size_t)fw * fw * 4, 0);
+                        bTr.fullW = bTr.fullH = fw; bTr.fullData.resize((size_t)fw * fw * 4, 0);
+                        sTr.fullW = sTr.fullH = fw; sTr.fullData.resize((size_t)fw * fw * 4, 0);
+                        const int offB_y = (28 * fw) / 16, offB_x = 2 * fw;
+                        const int offBg_y = (36 * fw) / 16, offFg_y = fw;
+                        for (int y = 0; y < fw; ++y) {
+                            for (int x = 0; x < fw; ++x) {
+                                size_t dstIdx = ((size_t)y * fw + x) * 4;
+                                size_t srcT = ((size_t)y * tr.fullW + (x + fw)) * 4;
+                                tTr.fullData[dstIdx + 0] = tr.fullData[srcT + 0];
+                                tTr.fullData[dstIdx + 1] = tr.fullData[srcT + 1];
+                                tTr.fullData[dstIdx + 2] = tr.fullData[srcT + 2];
+                                tTr.fullData[dstIdx + 3] = tr.fullData[srcT + 3];
+
+                                size_t srcB = ((size_t)(y + offB_y) * tr.fullW + (x + offB_x)) * 4;
+                                bTr.fullData[dstIdx + 0] = tr.fullData[srcB + 0];
+                                bTr.fullData[dstIdx + 1] = tr.fullData[srcB + 1];
+                                bTr.fullData[dstIdx + 2] = tr.fullData[srcB + 2];
+                                bTr.fullData[dstIdx + 3] = tr.fullData[srcB + 3];
+
+                                size_t srcBg = ((size_t)(y + offBg_y) * tr.fullW + x) * 4;
+                                size_t srcFg = ((size_t)(y + offFg_y) * tr.fullW + x) * 4;
+                                float aFg = tr.fullData[srcFg + 3] / 255.0f;
+                                sTr.fullData[dstIdx + 0] = (unsigned char)((tr.fullData[srcFg + 0] * aFg) + (tr.fullData[srcBg + 0] * (1.0f - aFg)));
+                                sTr.fullData[dstIdx + 1] = (unsigned char)((tr.fullData[srcFg + 1] * aFg) + (tr.fullData[srcBg + 1] * (1.0f - aFg)));
+                                sTr.fullData[dstIdx + 2] = (unsigned char)((tr.fullData[srcFg + 2] * aFg) + (tr.fullData[srcBg + 2] * (1.0f - aFg)));
+                                sTr.fullData[dstIdx + 3] = 255;
+                            }
+                        }
+                    }
+                }
+
+                allFiles[bd.id + "_top.png"] = std::move(tTr);
+                allFiles[bd.id + "_bottom.png"] = std::move(bTr);
+                allFiles[bd.id + "_side.png"] = sTr;
+                allFiles[bd.id + "_front.png"] = sTr;
+                allFiles[bd.id + "_back.png"] = std::move(sTr);
+            }
+            continue;
+        }
+
+        std::string ui_file = "";
+        if (allFiles.count(bd.id + ".png")) ui_file = bd.id + ".png";
+        else {
+            for (const auto& m : modifiers) {
+                if (allFiles.count(bd.id + "_" + m + ".png")) { ui_file = bd.id + "_" + m + ".png"; break; }
+            }
+        }
+        if (ui_file.empty()) {
+            for (const char* place : places) {
+                auto rows = blockFaceRows.find(std::string(place) + "|" + bd.id);
+                if (rows == blockFaceRows.end()) continue;
+                const FaceFix* pick = &rows->second[0];
+                for (const FaceFix& f : rows->second) if (f.state.find("facing=up") != std::string::npos) { pick = &f; break; }
+                if (allFiles.count(pick->texture)) { ui_file = pick->texture; break; }
+            }
+        }
+
+        if (!ui_file.empty()) {
+            const TextureRaw& tr = allFiles[ui_file];
+            extInfo.uiRgbaArray.resize(16 * 16 * 4, 0);
+            std::vector<float> tint = getBiomeTintVals(bd.id, "Plains");
+            for (int y = 0; y < 16; ++y) {
+                for (int x = 0; x < 16; ++x) {
+                    int dstIdx = (y * 16 + x) * 4;
+                    if (x < tr.w && y < tr.h) {
+                        int srcIdx = (y * tr.w + x) * 4;
+                        extInfo.uiRgbaArray[dstIdx] = (unsigned char)(std::min(255.0f, tr.data[srcIdx] * tint[0]));
+                        extInfo.uiRgbaArray[dstIdx + 1] = (unsigned char)(std::min(255.0f, tr.data[srcIdx + 1] * tint[1]));
+                        extInfo.uiRgbaArray[dstIdx + 2] = (unsigned char)(std::min(255.0f, tr.data[srcIdx + 2] * tint[2]));
+                        extInfo.uiRgbaArray[dstIdx + 3] = tr.data[srcIdx + 3];
+                    }
+                }
+            }
+        }
+    }
+}
+
 void loadBlockDatabase() {
     if (databaseLoaded) return;
     if (!std::filesystem::exists("resources/block_textures") || !std::filesystem::exists("resources/allowed_ids.csv")) {
@@ -238,6 +378,7 @@ void loadBlockDatabase() {
             }
         }
     }
+    vanillaFiles = allFiles;
 
 #if MMMM_VERBOSE
     Log("Parsing Dynamic Rule Databases...");
@@ -441,6 +582,7 @@ void loadBlockDatabase() {
 
 //////////////// PALETTE OF ONE MURAL
 std::vector<ActiveBlock> buildActivePalette(const std::string& ori, const std::string& drct, const std::string& biomeName, const std::vector<BlockData*>& activeBlocks, int bgMode, bool optUseOverlays, const std::vector<std::string>& optAllowedOverlays, bool isDelta) {
+    std::lock_guard<std::recursive_mutex> texLock(textureMutex);
     std::vector<ActiveBlock> palette;
     std::vector<int> bg = getPreviewBgColor(bgMode, biomeName);
     const std::string placeName = (ori == "vertical") ? ("wall " + drct) : (drct == "bottom" ? "ceiling" : "floor");
@@ -506,6 +648,9 @@ std::vector<ActiveBlock> buildActivePalette(const std::string& ori, const std::s
 
         ActiveBlock ab;
         ab.mc_id = finalMcString; ab.rgbArray = std::move(uiRgba);
+        ab.chosenFile = chosenFile;
+        ab.rotDegrees = rotDegrees;
+        ab.mirrored = mirrored;
         ab.flatLab = convertRGBtoLAB(mathRgb.data(), 16, 16);
         for (int i = 0; i < 256; ++i) ab.flatLab[i].alpha = rawAlphas[i];
 
@@ -772,6 +917,8 @@ std::vector<ActiveBlock> buildActivePalette(const std::string& ori, const std::s
                     newBlock.family = os.family;
                     newBlock.ovMask = os.mask;
                     newBlock.ovBaseIdx = i;    // palette[0..basePaletteSize) are the bare blocks
+                    newBlock.ovTextures = os.textures;
+                    newBlock.ovRotations = os.rotations;
                 }
             }
         }

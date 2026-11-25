@@ -1106,6 +1106,168 @@ hr {
     pointer-events: none;
 }
 
+/******** resource packs */
+.rp-section {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.rp-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.rp-title {
+    font-weight: 500;
+    color: var(--accent-title);
+    margin-right: 2px;
+}
+
+.rp-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    background: #181818;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 6px;
+}
+
+.rp-list-hint {
+    font-size: 11px;
+    color: var(--text-dim);
+    padding: 0 4px 2px;
+}
+
+.rp-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 6px;
+    background: var(--tab);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    font-size: 12.5px;
+}
+
+.rp-row-idx {
+    color: var(--text-dim);
+    font-variant-numeric: tabular-nums;
+    min-width: 16px;
+}
+
+.rp-row-name {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.rp-row-meta {
+    flex: 0 0 auto;
+    font-size: 11.5px;
+    color: var(--text-dim);
+    padding: 1px 6px;
+    background: var(--frame);
+    border-radius: 3px;
+}
+
+.rp-row-btn {
+    flex: 0 0 auto;
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--btn);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    cursor: pointer;
+    font-size: 12px;
+    line-height: 1;
+}
+
+    .rp-row-btn:hover:not(:disabled) {
+        background: var(--btn-hover);
+    }
+
+    .rp-row-btn:disabled {
+        opacity: 0.35;
+        cursor: default;
+    }
+
+.rp-warn {
+    padding: 6px 10px;
+    background: rgba(255, 230, 51, 0.08);
+    border: 1px solid rgba(255, 230, 51, 0.45);
+    border-radius: 4px;
+    color: var(--warn);
+    font-size: 12px;
+    line-height: 1.4;
+}
+
+.rp-modal-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 90;
+    background: rgba(0, 0, 0, 0.65);
+    display: grid;
+    place-items: center;
+    padding: 16px;
+}
+
+.rp-modal {
+    width: min(460px, 100%);
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 18px 20px;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.6);
+}
+
+    .rp-modal h3 {
+        margin: 0 0 10px;
+        font-size: 16px;
+        font-weight: 500;
+        color: var(--accent-title);
+    }
+
+    .rp-modal p {
+        margin: 0 0 10px;
+        font-size: 13px;
+        line-height: 1.5;
+        color: var(--text);
+    }
+
+    .rp-modal code {
+        padding: 1px 4px;
+        background: var(--frame);
+        border-radius: 3px;
+        font-size: 12px;
+    }
+
+    .rp-modal warn {
+    color: var(--warn);
+}
+
+.rp-modal-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 14px;
+}
+
+    .rp-modal-actions .btn {
+        flex: 0 0 auto;
+        height: 30px;
+        padding: 0 14px;
+    }
+
 
 /**************** CONSOLE */
 #console {

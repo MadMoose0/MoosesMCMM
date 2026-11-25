@@ -115,9 +115,14 @@ extern "C" {
     unsigned char* mural_preview_atlas();    // 16x16 rgba per palette entry in use
     int      mural_preview_atlas_cols();
     int      mural_preview_atlas_count();
+    int      mural_preview_tile_size();
     const char* mural_preview_ids_json();
     const char* mural_pick_and_disallow(int col, int row);
     const char* mural_bg_color(int mode);    // "r,g,b" at the current biome
+
+    //////// resource packs
+    void        mural_reset_resource_packs();
+    const char* mural_apply_resource_pack(const unsigned char* zipBytes, int zipLen, const char* packName);
 
     //////// console
     int  mural_log_count();

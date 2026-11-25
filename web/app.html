@@ -345,6 +345,18 @@
 
                 <div class="tabpane" id="pane-palette" role="tabpanel">
 
+                    <div class="rp-section" id="rp-section">
+                        <div class="row rp-head">
+                            <span class="rp-title">Resource Packs:</span>
+                            <button type="button" class="btn" id="btn-rp-import" title="Import one or more Minecraft resource pack .zip files">Import…</button>
+                            <button type="button" class="btn" id="btn-rp-reset" title="Restore default vanilla block textures" hidden>Reset to Vanilla</button>
+                            <input type="file" id="rp-file-input" accept=".zip,application/zip" multiple hidden>
+                        </div>
+                        <div id="rp-list" class="rp-list" hidden></div>
+                        <div id="rp-hd-note" class="rp-warn" hidden>HD textures detected: matching and calculations use textures downsampled to 16×16, while the mural preview renders the full-resolution textures from the resource pack.</div>
+                    </div>
+                    <hr>
+
                     <div class="row search-row">
                         <label for="in-search">Search:</label>
                         <div class="searchbox grow" id="searchbox">
@@ -475,6 +487,19 @@
 
     <div id="toast" hidden></div>
     <div id="help-pop" class="cfg-menu" hidden></div>
+
+    <div id="rp-confirm-modal" class="rp-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="rp-modal-title" hidden>
+        <div class="rp-modal">
+            <h3 id="rp-modal-title">Import Resource Packs (.zip)</h3>
+            <p>Resource packs are third-party <code>.zip</code> archives processed directly in your browser. While only matching block texture <code>.png</code> files are decoded and no scripts are executed, it is not guaranteed that a crafted or malicious archive (such as a zip bomb or malformed image stream) could not freeze your browser or exploit an image/zip parser.</p>
+            <p><warn>Only import resource packs from sources you trust.</warn></p>
+            <p>If multiple packs replace the same block texture, later packs in the list take precedence.</p>
+            <div class="rp-modal-actions">
+                <button type="button" class="btn" id="btn-rp-confirm-cancel">Cancel</button>
+                <button type="button" class="btn primary" id="btn-rp-confirm-go">Choose .zip File(s)…</button>
+            </div>
+        </div>
+    </div>
 
     <script src="mural.js"></script>
     <script src="app.js"></script>

@@ -78,6 +78,8 @@ inline const int OV_N = 8, OV_S = 4, OV_E = 2, OV_W = 1;
 struct TextureRaw {
     int w = 0, h = 0;
     std::vector<unsigned char> data;
+    int fullW = 0, fullH = 0;
+    std::vector<unsigned char> fullData;    // full-res square frame from an HD resource pack (0 when 16x16)
 };
 
 struct ExtendedBlockInfo {
@@ -97,6 +99,13 @@ struct ActiveBlock {
     std::string family = "none";
     int ovMask = -1;    // -1 = no overlay, else OV_* bits
     int ovBaseIdx = -1;    // palette index of this block without the overlay
+
+    // recipe for rendering full-resolution HD resource pack tiles in snapshotPreview()
+    std::string chosenFile = "";
+    int rotDegrees = 0;
+    bool mirrored = false;
+    std::vector<std::string> ovTextures;
+    std::vector<int> ovRotations;
 
     std::vector<unsigned char> rgbArray;
     ColorLab meanLab;
@@ -318,8 +327,11 @@ std::string oldGameWarning();    // call with dataMutex held
 
 
 //////////////// BLOCK DATA
+inline std::recursive_mutex textureMutex;
 inline std::map<std::string, TextureRaw> allFiles;
+inline std::map<std::string, TextureRaw> vanillaFiles;
 inline std::map<std::string, ExtendedBlockInfo> extBlockInfo;
+void rebuildBlockUiAndShulkers();
 
 // the face table: every side a block can show, as the game draws it (texture + turn)
 struct FaceFix { std::string state; std::string texture; int turn = 0; bool mirror = false; };
@@ -997,16 +1009,17 @@ inline std::vector<std::string> g_allOverlayIds;
 
 inline std::vector<int32_t> g_gridSnap;    // compacted palette index per cell
 inline std::vector<unsigned char> g_meanSnap;    // previewW * previewH rgba
-inline std::vector<unsigned char> g_paletteAtlas;    // 16x16 rgba per palette entry in use
+inline std::vector<unsigned char> g_paletteAtlas;    // tilePx x tilePx rgba per palette entry in use
 inline int g_paletteAtlasCols = 32;
 inline int g_paletteAtlasCount = 0;
+inline int g_paletteAtlasTileSize = 16;
 inline int g_snapW = 0, g_snapH = 0;
 void jsonEscape(const std::string& in, std::string& out);
 void jsonStr(const std::string& s, std::string& out);
 std::set<std::string> splitIdSet(const char* csv);
 void blitTile(std::vector<unsigned char>& atlas, int cols, int slot,
-    const unsigned char* src16);
-void ensureAtlasSize(std::vector<unsigned char>& atlas, int cols, int count);
+    const unsigned char* src, int tilePx = 16);
+void ensureAtlasSize(std::vector<unsigned char>& atlas, int cols, int count, int tilePx = 16);
 void buildBlockIconAtlas();
 void buildOverlayIconAtlas(int biomeIdxLocal);
 void captureOverlayIds();

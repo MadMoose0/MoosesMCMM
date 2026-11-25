@@ -48,38 +48,40 @@ std::set<std::string> splitIdSet(const char* csv) {
 }
 
 void blitTile(std::vector<unsigned char>& atlas, int cols, int slot,
-    const unsigned char* src16) {
-    int cx = (slot % cols) * 16;
-    int cy = (slot / cols) * 16;
-    int stride = cols * 16 * 4;
-    for (int y = 0; y < 16; ++y) {
+    const unsigned char* src, int tilePx) {
+    int cx = (slot % cols) * tilePx;
+    int cy = (slot / cols) * tilePx;
+    int stride = cols * tilePx * 4;
+    for (int y = 0; y < tilePx; ++y) {
         unsigned char* dst = atlas.data() + (size_t)(cy + y) * stride + (size_t)cx * 4;
-        memcpy(dst, src16 + (size_t)y * 16 * 4, 16 * 4);
+        memcpy(dst, src + (size_t)y * tilePx * 4, (size_t)tilePx * 4);
     }
 }
 
-void ensureAtlasSize(std::vector<unsigned char>& atlas, int cols, int count) {
+void ensureAtlasSize(std::vector<unsigned char>& atlas, int cols, int count, int tilePx) {
     int rows = (count + cols - 1) / cols;
     if (rows < 1) rows = 1;
-    atlas.assign((size_t)cols * 16 * (size_t)rows * 16 * 4, 0);
+    atlas.assign((size_t)cols * tilePx * (size_t)rows * tilePx * 4, 0);
 }
 
 
 //////////////// ICON ATLASES
 void buildBlockIconAtlas() {
+    std::lock_guard<std::recursive_mutex> texLock(textureMutex);
     int n = (int)masterDatabase.size();
-    ensureAtlasSize(g_blockAtlas, g_blockAtlasCols, n);
+    ensureAtlasSize(g_blockAtlas, g_blockAtlasCols, n, 16);
     for (int i = 0; i < n; ++i) {
         auto it = extBlockInfo.find(masterDatabase[i].id);
         if (it == extBlockInfo.end() || it->second.uiRgbaArray.size() < 16 * 16 * 4) continue;
-        blitTile(g_blockAtlas, g_blockAtlasCols, i, it->second.uiRgbaArray.data());
+        blitTile(g_blockAtlas, g_blockAtlasCols, i, it->second.uiRgbaArray.data(), 16);
     }
 }
 
 // overlay icons follow the biome tint, so this runs again when it changes
 void buildOverlayIconAtlas(int biomeIdxLocal) {
+    std::lock_guard<std::recursive_mutex> texLock(textureMutex);
     int n = (int)g_allOverlayIds.size();
-    ensureAtlasSize(g_overlayAtlas, g_overlayAtlasCols, n);
+    ensureAtlasSize(g_overlayAtlas, g_overlayAtlasCols, n, 16);
 
     std::vector<unsigned char> tile(16 * 16 * 4, 0);
     for (int i = 0; i < n; ++i) {
@@ -129,9 +131,161 @@ void captureOverlayIds() {
 
 //////////////// PREVIEW SNAPSHOT
 
+// renders one used palette entry at tilePx x tilePx using full-resolution resource pack textures when available
+static void renderFullResTile(const ActiveBlock& b, const std::vector<ActiveBlock>& pal,
+    const std::string& bName, bool transparentMode, int tilePx, std::vector<unsigned char>& tile) {
+    std::fill(tile.begin(), tile.end(), 0);
+    if (b.mc_id == "air") {
+        if (!transparentMode) {
+            for (int p = 0; p < tilePx * tilePx; ++p) {
+                tile[p * 4 + 0] = b.meanR; tile[p * 4 + 1] = b.meanG;
+                tile[p * 4 + 2] = b.meanB; tile[p * 4 + 3] = b.meanA;
+            }
+        }
+        return;
+    }
+
+    const ActiveBlock& base = (b.ovBaseIdx >= 0 && b.ovBaseIdx < (int)pal.size()) ? pal[b.ovBaseIdx] : b;
+    auto baseIt = (!base.chosenFile.empty()) ? allFiles.find(base.chosenFile) : allFiles.end();
+
+    if (baseIt != allFiles.end() && base.chosenFile.size() > 4) {
+        const TextureRaw& tr = baseIt->second;
+        const bool hasFull = (tr.fullW > 16 && tr.fullH >= tr.fullW && tr.fullData.size() >= (size_t)tr.fullW * tr.fullW * 4);
+        const unsigned char* srcBuf = hasFull ? tr.fullData.data() : tr.data.data();
+        const int srcS = hasFull ? tr.fullW : 16;
+        std::string baseName = base.chosenFile.substr(0, base.chosenFile.length() - 4);
+        std::vector<float> tint = getBiomeTintVals(baseName, bName);
+
+        for (int y = 0; y < tilePx; ++y) {
+            for (int x = 0; x < tilePx; ++x) {
+                const int sx = (x * srcS) / tilePx;
+                const int sy = (y * srcS) / tilePx;
+                const int mx = base.mirrored ? (tilePx - 1 - x) : x;
+                int nx = mx, ny = y;
+                if (base.rotDegrees == 90)       { nx = tilePx - 1 - y; ny = mx; }
+                else if (base.rotDegrees == 180) { nx = tilePx - 1 - mx; ny = tilePx - 1 - y; }
+                else if (base.rotDegrees == 270) { nx = y; ny = tilePx - 1 - mx; }
+
+                const size_t srcIdx = ((size_t)sy * srcS + sx) * 4;
+                const size_t dstIdx = ((size_t)ny * tilePx + nx) * 4;
+                if (srcIdx + 3 < (hasFull ? tr.fullData.size() : tr.data.size())) {
+                    tile[dstIdx + 0] = (unsigned char)std::min(255.0f, srcBuf[srcIdx + 0] * tint[0]);
+                    tile[dstIdx + 1] = (unsigned char)std::min(255.0f, srcBuf[srcIdx + 1] * tint[1]);
+                    tile[dstIdx + 2] = (unsigned char)std::min(255.0f, srcBuf[srcIdx + 2] * tint[2]);
+                    tile[dstIdx + 3] = srcBuf[srcIdx + 3];
+                }
+            }
+        }
+    }
+    else if (base.rgbArray.size() >= 16 * 16 * 4) {
+        for (int y = 0; y < tilePx; ++y) {
+            for (int x = 0; x < tilePx; ++x) {
+                const int sx = (x * 16) / tilePx, sy = (y * 16) / tilePx;
+                memcpy(&tile[((size_t)y * tilePx + x) * 4], &base.rgbArray[(sy * 16 + sx) * 4], 4);
+            }
+        }
+    }
+
+    if (b.ovId.empty()) return;
+
+    if (b.family == "redstone") {
+        const float rt[3] = { 75.0f / 255.0f, 0.0f, 0.0f };
+        auto stamp = [&](const char* file, int y0_16, int y1_16, bool turned) {
+            auto it = allFiles.find(file);
+            if (it == allFiles.end()) return;
+            const TextureRaw& tex = it->second;
+            const bool hasFull = (tex.fullW > 16 && tex.fullH >= tex.fullW && tex.fullData.size() >= (size_t)tex.fullW * tex.fullW * 4);
+            const unsigned char* srcBuf = hasFull ? tex.fullData.data() : tex.data.data();
+            const size_t srcBytes = hasFull ? tex.fullData.size() : tex.data.size();
+            const int srcS = hasFull ? tex.fullW : 16;
+            const int y0 = (y0_16 * tilePx) / 16, y1 = (y1_16 * tilePx) / 16;
+            for (int y = y0; y < y1; ++y) {
+                for (int x = 0; x < tilePx; ++x) {
+                    const int sx = (x * srcS) / tilePx, sy = (y * srcS) / tilePx;
+                    const size_t srcIdx = ((size_t)sy * srcS + sx) * 4;
+                    if (srcIdx + 3 >= srcBytes) continue;
+                    const float alpha = srcBuf[srcIdx + 3] / 255.0f;
+                    if (alpha <= 0.01f) continue;
+                    const int nx = turned ? y : x, ny = turned ? (tilePx - 1 - x) : y;
+                    const size_t dstIdx = ((size_t)ny * tilePx + nx) * 4;
+                    for (int k = 0; k < 3; ++k) {
+                        tile[dstIdx + k] = (unsigned char)((srcBuf[srcIdx + k] * rt[k] * alpha)
+                            + (tile[dstIdx + k] * (1.0f - alpha)));
+                    }
+                    tile[dstIdx + 3] = 255;
+                }
+            }
+        };
+        const int m = b.ovMask;
+        const bool ns = (m & (OV_N | OV_S)) != 0, ew = (m & (OV_E | OV_W)) != 0;
+        if ((!ns && !ew) || (ns && ew)) stamp("redstone_dust_dot.png", 0, 16, false);
+        if (m & OV_N) stamp("redstone_dust_line0.png", 0, 8, false);
+        if (m & OV_S) stamp("redstone_dust_line0.png", 8, 16, false);
+        if (m & OV_W) stamp("redstone_dust_line1.png", 0, 8, true);
+        if (m & OV_E) stamp("redstone_dust_line1.png", 8, 16, true);
+        return;
+    }
+
+    for (size_t tIdx = 0; tIdx < b.ovTextures.size(); ++tIdx) {
+        auto it = allFiles.find(b.ovTextures[tIdx]);
+        if (it == allFiles.end()) continue;
+        const TextureRaw& overlayTex = it->second;
+        const bool hasFull = (overlayTex.fullW > 16 && overlayTex.fullH >= overlayTex.fullW && overlayTex.fullData.size() >= (size_t)overlayTex.fullW * overlayTex.fullW * 4);
+        const unsigned char* srcBuf = hasFull ? overlayTex.fullData.data() : overlayTex.data.data();
+        const size_t srcBytes = hasFull ? overlayTex.fullData.size() : overlayTex.data.size();
+        const int srcS = hasFull ? overlayTex.fullW : 16;
+        const int rot = (tIdx < b.ovRotations.size()) ? b.ovRotations[tIdx] : 0;
+
+        std::vector<float> ovTint = { 1.0f, 1.0f, 1.0f };
+        if (b.ovId == "vine" || b.ovId == "leaf_litter") ovTint = getBiomeTintVals(b.ovId, bName);
+
+        const bool quartered = b.ovId == "pink_petals" || b.ovId == "leaf_litter" || b.ovId == "wildflowers";
+        int amount = 4;
+        if (quartered) {
+            const size_t pos = b.ovState.find("amount=");
+            if (pos != std::string::npos) amount = b.ovState[pos + 7] - '0';
+        }
+        const int half = tilePx / 2;
+
+        for (int y = 0; y < tilePx; ++y) {
+            for (int x = 0; x < tilePx; ++x) {
+                bool keep = true;
+                if (quartered) {
+                    keep = false;
+                    if (amount >= 1 && x < half && y < half)   keep = true;
+                    if (amount >= 2 && x < half && y >= half)  keep = true;
+                    if (amount >= 3 && x >= half && y >= half) keep = true;
+                    if (amount == 4 && x >= half && y < half)  keep = true;
+                }
+                if (!keep) continue;
+
+                int nx = x, ny = y;
+                if (rot == 90)       { nx = tilePx - 1 - y; ny = x; }
+                else if (rot == 180) { nx = tilePx - 1 - x; ny = tilePx - 1 - y; }
+                else if (rot == 270) { nx = y; ny = tilePx - 1 - x; }
+
+                const int sx = (x * srcS) / tilePx, sy = (y * srcS) / tilePx;
+                const size_t srcIdx = ((size_t)sy * srcS + sx) * 4;
+                const size_t dstIdx = ((size_t)ny * tilePx + nx) * 4;
+                const float alpha = (srcIdx + 3 < srcBytes) ? (srcBuf[srcIdx + 3] / 255.0f) : 0.0f;
+                if (alpha > 0.01f) {
+                    const float oR = srcBuf[srcIdx + 0] * ovTint[0];
+                    const float oG = srcBuf[srcIdx + 1] * ovTint[1];
+                    const float oB = srcBuf[srcIdx + 2] * ovTint[2];
+                    tile[dstIdx + 0] = (unsigned char)((oR * alpha) + (tile[dstIdx + 0] * (1.0f - alpha)));
+                    tile[dstIdx + 1] = (unsigned char)((oG * alpha) + (tile[dstIdx + 1] * (1.0f - alpha)));
+                    tile[dstIdx + 2] = (unsigned char)((oB * alpha) + (tile[dstIdx + 2] * (1.0f - alpha)));
+                    tile[dstIdx + 3] = 255;
+                }
+            }
+        }
+    }
+}
+
 // a mean pixel per block for zoomed out, full tiles of the entries in use for zoomed in
 // only entries in use go into the atlas: the palette has thousands of variants
 void snapshotPreview() {
+    std::lock_guard<std::recursive_mutex> texLock(textureMutex);
     std::lock_guard<std::mutex> lock(dataMutex);
 
     g_snapW = previewWidth;
@@ -143,6 +297,7 @@ void snapshotPreview() {
         g_meanSnap.clear();
         g_paletteAtlas.clear();
         g_paletteAtlasCount = 0;
+        g_paletteAtlasTileSize = 16;
         g_jsonPreviewIds = "[]";
         g_jsonPreviewOverlays = "[]";
         return;
@@ -173,29 +328,65 @@ void snapshotPreview() {
     }
 
     g_paletteAtlasCount = (int)used.size();
-    ensureAtlasSize(g_paletteAtlas, g_paletteAtlasCols, g_paletteAtlasCount);
+
+    int tilePx = 16;
+    for (int slot = 0; slot < g_paletteAtlasCount; ++slot) {
+        const ActiveBlock& b = (*activePalette)[used[slot]];
+        if (b.mc_id == "air") continue;
+        const ActiveBlock& base = (b.ovBaseIdx >= 0 && b.ovBaseIdx < (int)activePalette->size())
+            ? (*activePalette)[b.ovBaseIdx] : b;
+        if (!base.chosenFile.empty()) {
+            auto it = allFiles.find(base.chosenFile);
+            if (it != allFiles.end() && it->second.fullW > tilePx) tilePx = it->second.fullW;
+        }
+        if (!b.ovId.empty()) {
+            if (b.family == "redstone") {
+                static const char* const rsFiles[] = { "redstone_dust_dot.png", "redstone_dust_line0.png", "redstone_dust_line1.png" };
+                for (const char* rf : rsFiles) {
+                    auto it = allFiles.find(rf);
+                    if (it != allFiles.end() && it->second.fullW > tilePx) tilePx = it->second.fullW;
+                }
+            }
+            else {
+                for (const std::string& tf : b.ovTextures) {
+                    auto it = allFiles.find(tf);
+                    if (it != allFiles.end() && it->second.fullW > tilePx) tilePx = it->second.fullW;
+                }
+            }
+        }
+    }
+    tilePx = std::clamp(tilePx, 16, 128);
+    g_paletteAtlasTileSize = tilePx;
+
+    ensureAtlasSize(g_paletteAtlas, g_paletteAtlasCols, g_paletteAtlasCount, tilePx);
 
     g_jsonPreviewIds = "[";
     g_jsonPreviewOverlays = "[";
-    std::vector<unsigned char> tile(16 * 16 * 4, 0);
+    std::vector<unsigned char> tile((size_t)tilePx * tilePx * 4, 0);
+    const std::string curBiome = biomeName(biomeIdx);
 
     for (int slot = 0; slot < g_paletteAtlasCount; ++slot) {
         const ActiveBlock& b = (*activePalette)[used[slot]];
         bool isAir = (b.mc_id == "air");
 
-        if (b.rgbArray.size() >= 16 * 16 * 4) {
-            memcpy(tile.data(), b.rgbArray.data(), 16 * 16 * 4);
-        }
-        else {
-            for (int p = 0; p < 16 * 16; ++p) {
-                tile[p * 4 + 0] = b.meanR; tile[p * 4 + 1] = b.meanG;
-                tile[p * 4 + 2] = b.meanB; tile[p * 4 + 3] = b.meanA;
+        if (tilePx == 16) {
+            if (b.rgbArray.size() >= 16 * 16 * 4) {
+                memcpy(tile.data(), b.rgbArray.data(), 16 * 16 * 4);
+            }
+            else {
+                for (int p = 0; p < 16 * 16; ++p) {
+                    tile[p * 4 + 0] = b.meanR; tile[p * 4 + 1] = b.meanG;
+                    tile[p * 4 + 2] = b.meanB; tile[p * 4 + 3] = b.meanA;
+                }
+            }
+            if (transparentMode && isAir) {
+                for (int p = 0; p < 16 * 16; ++p) tile[p * 4 + 3] = 0;
             }
         }
-        if (transparentMode && isAir) {
-            for (int p = 0; p < 16 * 16; ++p) tile[p * 4 + 3] = 0;
+        else {
+            renderFullResTile(b, *activePalette, curBiome, transparentMode, tilePx, tile);
         }
-        blitTile(g_paletteAtlas, g_paletteAtlasCols, slot, tile.data());
+        blitTile(g_paletteAtlas, g_paletteAtlasCols, slot, tile.data(), tilePx);
 
         if (slot) { g_jsonPreviewIds += ','; g_jsonPreviewOverlays += ','; }
         std::string base = b.mc_id.substr(0, b.mc_id.find('['));
@@ -640,8 +831,229 @@ extern "C" {
     unsigned char* EMSCRIPTEN_KEEPALIVE mural_preview_atlas() { return g_paletteAtlas.data(); }
     int EMSCRIPTEN_KEEPALIVE mural_preview_atlas_cols() { return g_paletteAtlasCols; }
     int EMSCRIPTEN_KEEPALIVE mural_preview_atlas_count() { return g_paletteAtlasCount; }
+    int EMSCRIPTEN_KEEPALIVE mural_preview_tile_size() { return g_paletteAtlasTileSize; }
     const char* EMSCRIPTEN_KEEPALIVE mural_preview_ids_json() { return g_jsonPreviewIds.c_str(); }
     const char* EMSCRIPTEN_KEEPALIVE mural_preview_overlays_json() { return g_jsonPreviewOverlays.c_str(); }
+
+    //////// resource packs
+    void EMSCRIPTEN_KEEPALIVE mural_reset_resource_packs() {
+        currentCalcId++;
+        int curBiome = 0;
+        {
+            std::lock_guard<std::recursive_mutex> texLock(textureMutex);
+            {
+                std::lock_guard<std::mutex> lock(dataMutex);
+                curBiome = biomeIdx;
+                cachedPalette = std::make_shared<const std::vector<ActiveBlock>>();
+            }
+            if (!vanillaFiles.empty()) {
+                allFiles = vanillaFiles;
+                rebuildBlockUiAndShulkers();
+                buildBlockIconAtlas();
+                buildOverlayIconAtlas(curBiome);
+            }
+        }
+        Log("Restored vanilla block textures.");
+    }
+
+    const char* EMSCRIPTEN_KEEPALIVE mural_apply_resource_pack(const unsigned char* zipBytes, int zipLen, const char* packName) {
+        static std::string out;
+        const std::string pName = (packName && *packName) ? packName : "resource_pack.zip";
+
+        if (!zipBytes || zipLen <= 0) {
+            out = "{\"ok\":false,\"replaced\":0,\"hd\":0,\"maxRes\":16,\"error\":\"Empty archive.\"}";
+            return out.c_str();
+        }
+
+        mz_zip_archive zip;
+        memset(&zip, 0, sizeof(zip));
+        if (!mz_zip_reader_init_mem(&zip, zipBytes, (size_t)zipLen, 0)) {
+            out = "{\"ok\":false,\"replaced\":0,\"hd\":0,\"maxRes\":16,\"error\":\"Not a valid .zip archive.\"}";
+            return out.c_str();
+        }
+
+        currentCalcId++;
+        std::set<std::string> replacedInPack;
+        std::set<std::string> hdInPack;
+        int maxRes = 16;
+        size_t totalExtracted = 0;
+        constexpr size_t kMaxSingleFileBytes = 16 * 1024 * 1024;
+        constexpr size_t kMaxTotalPackBytes = 256 * 1024 * 1024;
+
+        {
+            std::lock_guard<std::recursive_mutex> texLock(textureMutex);
+            const mz_uint numFiles = mz_zip_reader_get_num_files(&zip);
+
+            for (mz_uint i = 0; i < numFiles; ++i) {
+                mz_zip_archive_file_stat st;
+                if (!mz_zip_reader_file_stat(&zip, i, &st)) continue;
+                if (st.m_is_directory) continue;
+                if (st.m_uncomp_size == 0 || st.m_uncomp_size > kMaxSingleFileBytes) continue;
+                if (totalExtracted + (size_t)st.m_uncomp_size > kMaxTotalPackBytes) break;
+
+                std::string path = st.m_filename;
+                for (char& c : path) {
+                    if (c == '\\') c = '/';
+                    else c = (char)std::tolower((unsigned char)c);
+                }
+                while (!path.empty() && path.front() == '/') path.erase(path.begin());
+
+                if (path.size() <= 4 || path.substr(path.size() - 4) != ".png") continue;
+
+                const size_t slash = path.rfind('/');
+                const std::string dir = (slash == std::string::npos) ? "" : path.substr(0, slash);
+                std::string filename = (slash == std::string::npos) ? path : path.substr(slash + 1);
+
+                if (filename == "grass_path_top.png")  filename = "dirt_path_top.png";
+                if (filename == "grass_path_side.png") filename = "dirt_path_side.png";
+
+                if (vanillaFiles.find(filename) == vanillaFiles.end()) continue;
+
+                const bool isShulkerSheet = (filename == "shulker.png" ||
+                    (filename.rfind("shulker_", 0) == 0 && filename.find("shulker_box") == std::string::npos));
+
+                auto endsWith = [](const std::string& s, const char* suf) {
+                    const size_t len = strlen(suf);
+                    return s.size() >= len && s.compare(s.size() - len, len, suf) == 0;
+                };
+
+                bool pathAllowed = false;
+                if (endsWith(dir, "textures/block") || endsWith(dir, "textures/blocks")) {
+                    pathAllowed = true;
+                }
+                else if (isShulkerSheet && endsWith(dir, "textures/entity/shulker")) {
+                    pathAllowed = true;
+                }
+                else if (dir.find("textures/") == std::string::npos && dir.rfind("textures", 0) != 0) {
+                    pathAllowed = true;
+                }
+                if (!pathAllowed) continue;
+
+                std::vector<unsigned char> pngBuf((size_t)st.m_uncomp_size);
+                if (!mz_zip_reader_extract_to_mem(&zip, i, pngBuf.data(), pngBuf.size(), 0)) continue;
+                totalExtracted += pngBuf.size();
+
+                int w = 0, h = 0, c = 0;
+                unsigned char* img = stbi_load_from_memory(pngBuf.data(), (int)pngBuf.size(), &w, &h, &c, 4);
+                if (!img) continue;
+                if (w <= 0 || h <= 0 || w > 2048 || h > 16384) {
+                    stbi_image_free(img);
+                    continue;
+                }
+
+                if (isShulkerSheet) {
+                    if (w < 64 || h < 64) {
+                        stbi_image_free(img);
+                        continue;
+                    }
+                    const int sheetS = std::min(w, h);
+                    std::vector<unsigned char> sq((size_t)sheetS * sheetS * 4);
+                    for (int y = 0; y < sheetS; ++y) {
+                        memcpy(sq.data() + (size_t)y * sheetS * 4, img + (size_t)y * w * 4, (size_t)sheetS * 4);
+                    }
+                    stbi_image_free(img);
+
+                    TextureRaw tr;
+                    tr.w = 64; tr.h = 64;
+                    tr.data.resize(64 * 64 * 4);
+                    if (sheetS == 64) {
+                        tr.data = std::move(sq);
+                    }
+                    else {
+                        const int faceRes = sheetS / 4;
+                        if (faceRes > 16) {
+                            hdInPack.insert(filename);
+                            maxRes = std::max(maxRes, faceRes);
+                        }
+                        int fullSheetS = std::min(sheetS, 512);
+                        fullSheetS = std::max(64, (fullSheetS / 4) * 4);
+                        tr.fullW = fullSheetS; tr.fullH = fullSheetS;
+                        if (sheetS == fullSheetS) {
+                            tr.fullData = sq;
+                        }
+                        else {
+                            tr.fullData.resize((size_t)fullSheetS * fullSheetS * 4);
+                            stbir_resize_uint8_linear(sq.data(), sheetS, sheetS, sheetS * 4,
+                                tr.fullData.data(), fullSheetS, fullSheetS, fullSheetS * 4, STBIR_RGBA);
+                        }
+                        stbir_resize_uint8_linear(sq.data(), sheetS, sheetS, sheetS * 4,
+                            tr.data.data(), 64, 64, 64 * 4, STBIR_RGBA);
+                    }
+                    allFiles[filename] = std::move(tr);
+                    replacedInPack.insert(filename);
+                }
+                else {
+                    const int frameS = std::min(w, h);
+                    std::vector<unsigned char> sq((size_t)frameS * frameS * 4);
+                    for (int y = 0; y < frameS; ++y) {
+                        memcpy(sq.data() + (size_t)y * frameS * 4, img + (size_t)y * w * 4, (size_t)frameS * 4);
+                    }
+                    stbi_image_free(img);
+
+                    TextureRaw tr;
+                    tr.w = 16; tr.h = 16;
+                    tr.data.resize(16 * 16 * 4);
+                    if (frameS == 16) {
+                        tr.data = std::move(sq);
+                    }
+                    else {
+                        if (frameS > 16) {
+                            hdInPack.insert(filename);
+                            maxRes = std::max(maxRes, frameS);
+                            const int fullS = std::min(frameS, 128);
+                            tr.fullW = fullS; tr.fullH = fullS;
+                            if (frameS == fullS) {
+                                tr.fullData = sq;
+                            }
+                            else {
+                                tr.fullData.resize((size_t)fullS * fullS * 4);
+                                stbir_resize_uint8_linear(sq.data(), frameS, frameS, frameS * 4,
+                                    tr.fullData.data(), fullS, fullS, fullS * 4, STBIR_RGBA);
+                            }
+                        }
+                        stbir_resize_uint8_linear(sq.data(), frameS, frameS, frameS * 4,
+                            tr.data.data(), 16, 16, 16 * 4, STBIR_RGBA);
+                    }
+                    allFiles[filename] = std::move(tr);
+                    replacedInPack.insert(filename);
+                }
+            }
+            mz_zip_reader_end(&zip);
+
+            if (!replacedInPack.empty()) {
+                int curBiome = 0;
+                {
+                    std::lock_guard<std::mutex> lock(dataMutex);
+                    curBiome = biomeIdx;
+                    cachedPalette = std::make_shared<const std::vector<ActiveBlock>>();
+                }
+                rebuildBlockUiAndShulkers();
+                buildBlockIconAtlas();
+                buildOverlayIconAtlas(curBiome);
+            }
+        }
+
+        if (!replacedInPack.empty()) {
+            std::string msg = "Resource pack '" + pName + "': loaded " + std::to_string(replacedInPack.size()) + " block textures";
+            if (!hdInPack.empty()) {
+                msg += " (up to " + std::to_string(maxRes) + "x" + std::to_string(maxRes)
+                    + "px; downsampled to 16x16 for matching, full-res for preview).";
+            }
+            else {
+                msg += ".";
+            }
+            Log(msg);
+        }
+        else {
+            Log("Resource pack '" + pName + "': no matching block textures found.");
+        }
+
+        char buf[256];
+        snprintf(buf, sizeof(buf), "{\"ok\":true,\"replaced\":%zu,\"hd\":%zu,\"maxRes\":%d}",
+            replacedInPack.size(), hdInPack.size(), maxRes);
+        out = buf;
+        return out.c_str();
+    }
 
     // the moves that build the rails + dust on screen, ops = [type, kind, arg, x, z] as railbuild::Op
     // input = what the builder was asked for, three numbers per cell (kind, shape, flags)

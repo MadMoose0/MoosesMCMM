@@ -73,10 +73,14 @@ const api = {
   previewAtlas:   () => M._mural_preview_atlas() >>> 0,
   previewCols:    () => M._mural_preview_atlas_cols(),
   previewCount:   () => M._mural_preview_atlas_count(),
+  previewTileSize:() => M._mural_preview_tile_size ? M._mural_preview_tile_size() : 16,
   previewIdsJson: () => M.ccall('mural_preview_ids_json', 'string', [], []),
   previewOverlaysJson: () => M.ccall('mural_preview_overlays_json', 'string', [], []),
   pickAndDisallow:(c, r) => M.ccall('mural_pick_and_disallow', 'string', ['number','number'], [c, r]),
   bgColor:        m => M.ccall('mural_bg_color', 'string', ['number'], [m]),
+
+  resetResourcePacks: () => M._mural_reset_resource_packs(),
+  applyResourcePack:  (ptr, len, name) => M.ccall('mural_apply_resource_pack', 'string', ['number','number','string'], [ptr, len, name]),
 
   log:       msg => M.ccall('mural_log', null, ['string'], [msg]),
   logCount:  () => M._mural_log_count(),
@@ -161,6 +165,9 @@ const el = {
   listOvAllowed: $('#list-ov-allowed'), listOvDisallowed: $('#list-ov-disallowed'),
   overlays: $('#in-overlays'), overlayFields: $('#overlay-fields'),
   moveBtn: $('#btn-move'), ovMoveBtn: $('#btn-ov-move'),
+  rpImport: $('#btn-rp-import'), rpReset: $('#btn-rp-reset'), rpFile: $('#rp-file-input'),
+  rpList: $('#rp-list'), rpHdNote: $('#rp-hd-note'),
+  rpModal: $('#rp-confirm-modal'), rpModalGo: $('#btn-rp-confirm-go'), rpModalCancel: $('#btn-rp-confirm-cancel'),
   warning: $('#warning'),
   canvas: $('#canvas'), wrap: $('#canvas-wrap'),
   empty: $('#canvas-empty'), busy: $('#canvas-busy'), readout: $('#block-readout'),
@@ -741,6 +748,221 @@ function wireControls() {
   wireDropTarget();
   wireSplitter();
   wireConsoleFold();
+  wireResourcePacks();
+}
+
+
+//////////////// RESOURCE PACKS
+const resourcePacks = [];    // [{ name, bytes, replaced, hd, maxRes }], applied top to bottom
+
+function applyPackInEngine(bytes, name) {
+  const ptr = M._malloc(bytes.length) >>> 0;
+  M.HEAPU8.set(bytes, ptr);
+  let res;
+  try {
+    res = JSON.parse(api.applyResourcePack(ptr, bytes.length, name));
+  } finally {
+    M._free(ptr);
+  }
+  return res;
+}
+
+function afterResourcePackChange() {
+  renderResourcePackList();
+  buildAtlasVar('--block-atlas', api.blockAtlas(), api.blockAtlasCols(), blocks.length);
+  buildAtlasVar('--overlay-atlas', api.overlayAtlas(), api.overlayAtlasCols(), overlays.length);
+  refreshSwatches();
+  pumpLog();
+  if (api.hasImage()) schedulePreview(0);
+}
+
+function reapplyResourcePackStack() {
+  api.resetResourcePacks();
+  for (const p of resourcePacks) {
+    const res = applyPackInEngine(p.bytes, p.name);
+    if (res && res.ok) {
+      p.replaced = res.replaced;
+      p.hd = res.hd;
+      p.maxRes = res.maxRes;
+    }
+  }
+  afterResourcePackChange();
+}
+
+function renderResourcePackList() {
+  const hasPacks = resourcePacks.length > 0;
+  if (el.rpReset) el.rpReset.hidden = !hasPacks;
+  if (el.rpList) el.rpList.hidden = !hasPacks;
+  const hasHd = resourcePacks.some(p => p.hd > 0);
+  if (el.rpHdNote) el.rpHdNote.hidden = !hasHd;
+  if (!hasPacks || !el.rpList) {
+    if (el.rpList) el.rpList.replaceChildren();
+    return;
+  }
+
+  const frag = document.createDocumentFragment();
+  if (resourcePacks.length > 1) {
+    const hint = document.createElement('div');
+    hint.className = 'rp-list-hint';
+    hint.textContent = 'Applied top to bottom (later packs override earlier ones):';
+    frag.appendChild(hint);
+  }
+
+  resourcePacks.forEach((p, idx) => {
+    const row = document.createElement('div');
+    row.className = 'rp-row';
+
+    const num = document.createElement('span');
+    num.className = 'rp-row-idx';
+    num.textContent = `${idx + 1}.`;
+
+    const name = document.createElement('span');
+    name.className = 'rp-row-name';
+    name.textContent = p.name;
+    name.title = p.name;
+
+    const meta = document.createElement('span');
+    meta.className = 'rp-row-meta';
+    meta.textContent = `${p.replaced} tex` + (p.hd > 0 ? ` · ${p.maxRes}×${p.maxRes}` : '');
+
+    const up = document.createElement('button');
+    up.type = 'button';
+    up.className = 'rp-row-btn';
+    up.textContent = '↑';
+    up.title = 'Move up (lower priority)';
+    up.disabled = idx === 0;
+    up.addEventListener('click', () => {
+      if (idx <= 0) return;
+      const tmp = resourcePacks[idx - 1];
+      resourcePacks[idx - 1] = resourcePacks[idx];
+      resourcePacks[idx] = tmp;
+      reapplyResourcePackStack();
+    });
+
+    const down = document.createElement('button');
+    down.type = 'button';
+    down.className = 'rp-row-btn';
+    down.textContent = '↓';
+    down.title = 'Move down (higher priority — overrides earlier packs)';
+    down.disabled = idx === resourcePacks.length - 1;
+    down.addEventListener('click', () => {
+      if (idx >= resourcePacks.length - 1) return;
+      const tmp = resourcePacks[idx + 1];
+      resourcePacks[idx + 1] = resourcePacks[idx];
+      resourcePacks[idx] = tmp;
+      reapplyResourcePackStack();
+    });
+
+    const del = document.createElement('button');
+    del.type = 'button';
+    del.className = 'rp-row-btn';
+    del.textContent = '×';
+    del.title = 'Remove this resource pack';
+    del.addEventListener('click', () => {
+      resourcePacks.splice(idx, 1);
+      reapplyResourcePackStack();
+    });
+
+    row.append(num, name, meta, up, down, del);
+    frag.appendChild(row);
+  });
+
+  el.rpList.replaceChildren(frag);
+}
+
+async function importResourcePackFiles(files) {
+  if (!files || !files.length || !M) return;
+  let added = 0;
+  let replacedExisting = false;
+
+  for (const file of files) {
+    let buf;
+    try {
+      buf = new Uint8Array(await file.arrayBuffer());
+    } catch (_) {
+      toast(`Could not read ${file.name}.`);
+      continue;
+    }
+
+    const res = applyPackInEngine(buf, file.name);
+    if (!res || !res.ok) {
+      toast(`${file.name}: ${(res && res.error) || 'Not a valid .zip archive.'}`);
+      continue;
+    }
+    if (!res.replaced) {
+      toast(`${file.name}: No matching Minecraft block textures found.`);
+      continue;
+    }
+
+    const dupIdx = resourcePacks.findIndex(p => p.name === file.name);
+    if (dupIdx >= 0) {
+      resourcePacks.splice(dupIdx, 1);
+      replacedExisting = true;
+    }
+
+    resourcePacks.push({
+      name: file.name,
+      bytes: buf,
+      replaced: res.replaced,
+      hd: res.hd || 0,
+      maxRes: res.maxRes || 16
+    });
+    added++;
+  }
+
+  if (!added) {
+    pumpLog();
+    return;
+  }
+
+  if (replacedExisting) {
+    reapplyResourcePackStack();
+  } else {
+    afterResourcePackChange();
+  }
+}
+
+function wireResourcePacks() {
+  if (!el.rpImport || !el.rpFile) return;
+
+  const closeModal = () => {
+    if (el.rpModal) el.rpModal.hidden = true;
+  };
+
+  el.rpImport.addEventListener('click', () => {
+    if (el.rpModal) {
+      el.rpModal.hidden = false;
+      el.rpModalGo?.focus();
+    } else {
+      el.rpFile.click();
+    }
+  });
+
+  el.rpModalCancel?.addEventListener('click', closeModal);
+  el.rpModal?.addEventListener('click', e => {
+    if (e.target === el.rpModal) closeModal();
+  });
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && el.rpModal && !el.rpModal.hidden) closeModal();
+  });
+
+  el.rpModalGo?.addEventListener('click', () => {
+    closeModal();
+    el.rpFile.click();
+  });
+
+  el.rpFile.addEventListener('change', () => {
+    const files = Array.from(el.rpFile.files || []);
+    el.rpFile.value = '';
+    if (files.length) importResourcePackFiles(files);
+  });
+
+  el.rpReset?.addEventListener('click', () => {
+    if (!resourcePacks.length) return;
+    resourcePacks.length = 0;
+    api.resetResourcePacks();
+    afterResourcePackChange();
+  });
 }
 
 
@@ -1425,7 +1647,8 @@ const preview = {
   w: 0, h: 0,
   grid: null,    // atlas slot per block
   mean: null,    // canvas, 1 px per block, used when zoomed far out
-  atlas: null,    // canvas, 16x16 tile per palette entry in use
+  atlas: null,    // canvas, tileSize x tileSize tile per palette entry in use
+  tileSize: 16,   // px per tile in preview.atlas (16 for vanilla, up to 128 for HD resource packs)
   ids: null,      // base block id per atlas slot (mural_preview_ids_json)
   overlays: null, // overlay string per atlas slot (mural_preview_overlays_json)
   cols: 32
@@ -1479,11 +1702,14 @@ function onPreviewReady() {
     preview.cols = api.previewCols();
     const count = api.previewCount();
     const rows = Math.max(1, Math.ceil(count / preview.cols));
-    preview.atlas = rgbaToCanvas(api.previewAtlas(), preview.cols * 16, rows * 16);
+    const ts = api.previewTileSize();
+    preview.tileSize = ts;
+    preview.atlas = rgbaToCanvas(api.previewAtlas(), preview.cols * ts, rows * ts);
     preview.ids = JSON.parse(api.previewIdsJson());
     preview.overlays = JSON.parse(api.previewOverlaysJson());
   } else {
     preview.grid = preview.mean = preview.atlas = preview.ids = preview.overlays = null;
+    preview.tileSize = 16;
   }
 
   // with aspect lock the engine picks the other side, so read the size back
@@ -1627,6 +1853,11 @@ function drawChecker(ctx, bw, bh, dpr) {
 
 function drawFromAtlas(ctx, bw, bh, scale, ox, oy) {
   const cols = preview.cols;
+  const ts = preview.tileSize || 16;
+  if (ts > 16) {
+    ctx.imageSmoothingEnabled = scale < ts;
+    if (ctx.imageSmoothingEnabled) ctx.imageSmoothingQuality = 'high';
+  }
   const c0 = Math.max(0, Math.floor(-ox / scale));
   const c1 = Math.min(preview.w, Math.ceil((bw - ox) / scale));
   const r0 = Math.max(0, Math.floor(-oy / scale));
@@ -1638,7 +1869,7 @@ function drawFromAtlas(ctx, bw, bh, scale, ox, oy) {
       const slot = preview.grid[r * preview.w + c];
       if (slot < 0) continue;
       ctx.drawImage(preview.atlas,
-        (slot % cols) * 16, Math.floor(slot / cols) * 16, 16, 16,
+        (slot % cols) * ts, Math.floor(slot / cols) * ts, ts, ts,
         ox + c * scale, dy, scale, scale);
     }
   }
@@ -2766,8 +2997,9 @@ function renderFullPreview(px) {
   const ctx = c.getContext('2d');
 
   if (preview.atlas && preview.grid) {
-    ctx.imageSmoothingEnabled = px < 16;    // tiles are 16 px, smooth only when shrinking
-    if (px < 16) ctx.imageSmoothingQuality = 'high';
+    const ts = preview.tileSize || 16;
+    ctx.imageSmoothingEnabled = px < ts;    // smooth only when shrinking below the tile resolution
+    if (px < ts) ctx.imageSmoothingQuality = 'high';
 
     const cols = preview.cols;
     for (let r = 0; r < preview.h; r++) {
@@ -2777,7 +3009,7 @@ function renderFullPreview(px) {
         const slot = preview.grid[row + col];
         if (slot < 0) continue;
         ctx.drawImage(preview.atlas,
-          (slot % cols) * 16, Math.floor(slot / cols) * 16, 16, 16,
+          (slot % cols) * ts, Math.floor(slot / cols) * ts, ts, ts,
           col * px, dy, px, px);
       }
     }
